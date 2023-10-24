@@ -8,8 +8,12 @@ description = "chimera_llama_grpc"
 keywords = ["chimera_llama_grpc"]
 requires-python = ">=3.8"
 dependencies = [
+    "chimera_llm_proto",
+    "click",
+    "anyio",
     "pydantic>=2",
     "loguru",
+    "importlib_metadata",
     # LLAMA
     "torch",
     "fairscale",
@@ -24,8 +28,10 @@ classifiers = [
     'Programming Language :: Python :: 3.11',
 ]
 [project.optional-dependencies]
-test = ["pytest"]
+test = ["pytest", "pytest-grpc"]
 
+[project.scripts]
+chimera-llama-grpc = "chimera_llama_grpc.cli:cli"
 
 [[project.authors]]
 name = "wh1isper"
