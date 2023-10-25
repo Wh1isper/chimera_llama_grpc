@@ -1,27 +1,25 @@
-import uuid
 from functools import wraps
 from typing import Optional
 
 import grpc
 from chimera_llm_proto import chimera_llm_pb2, chimera_llm_pb2_grpc
+from chimera_llm_proto.tools import get_inference_args, get_uuid
 
-from chimera_llama_grpc.llama import Dialog, Llama
-from chimera_llama_grpc.llama.generation import Message
+from chimera_llama_grpc.llama import Llama
 from chimera_llama_grpc.log import logger
 from chimera_llama_grpc.tools import run_in_threadpool
 
 
-def get_common_args(common_args: chimera_llm_pb2.CommonArgs) -> dict:
-    args = {}
-    for field in common_args.DESCRIPTOR.fields:
-        v = getattr(common_args, field.name)
-        if v:
-            args[field.name] = v
-    return args
+def log_exception(f):
+    @wraps(f)
+    async def wrapper(*args, **kwargs):
+        try:
+            return await f(*args, **kwargs)
+        except Exception as e:
+            logger.exception(e)
+            raise
 
-
-def get_uuid() -> str:
-    return str(uuid.uuid4())
+    return wrapper
 
 
 pb_role_map = {
@@ -44,18 +42,6 @@ def role_to_pb(role: str) -> chimera_llm_pb2.Role:
     return role_pb_map[role]
 
 
-def log_exception(f):
-    @wraps(f)
-    async def wrapper(*args, **kwargs):
-        try:
-            return await f(*args, **kwargs)
-        except Exception as e:
-            logger.exception(e)
-            raise
-
-    return wrapper
-
-
 class LlamaServicer(chimera_llm_pb2_grpc.LLMServicer):
     def __init__(
         self,
@@ -65,7 +51,7 @@ class LlamaServicer(chimera_llm_pb2_grpc.LLMServicer):
         max_batch_size: Optional[int] = None,
     ) -> None:
         if not max_seq_len:
-            max_seq_len = 512
+            max_seq_len = 2048
         if not max_batch_size:
             max_batch_size = 8
 
@@ -100,7 +86,7 @@ class LlamaServicer(chimera_llm_pb2_grpc.LLMServicer):
         kwargs = {
             "prompts": [request.prompt],
         }
-        kwargs.update(get_common_args(request.common_args))
+        kwargs.update(get_inference_args(request.inference_args))
 
         logger.debug(f"Text completion request: {kwargs}")
         predictions = await run_in_threadpool(self.model.text_completion, **kwargs)
@@ -132,7 +118,7 @@ class LlamaServicer(chimera_llm_pb2_grpc.LLMServicer):
         kwargs = {
             "dialogs": [dialog],
         }
-        kwargs.update(get_common_args(request.common_args))
+        kwargs.update(get_inference_args(request.inference_args))
 
         logger.debug(f"Chat request: {kwargs}")
         predictions = await run_in_threadpool(self.model.chat_completion, **kwargs)
