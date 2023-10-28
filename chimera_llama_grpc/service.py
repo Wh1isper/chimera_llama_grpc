@@ -1,3 +1,4 @@
+import asyncio
 from functools import wraps
 from typing import Optional
 
@@ -7,6 +8,7 @@ from chimera_llm_proto.tools import get_inference_args, get_uuid
 
 from chimera_llama_grpc.llama import Llama
 from chimera_llama_grpc.log import logger
+from chimera_llama_grpc.model_manager import ModelManager
 from chimera_llama_grpc.tools import run_in_threadpool
 
 
@@ -15,6 +17,19 @@ def log_exception(f):
     async def wrapper(*args, **kwargs):
         try:
             return await f(*args, **kwargs)
+        except Exception as e:
+            logger.exception(e)
+            raise
+
+    return wrapper
+
+
+def log_stream_exception(f):
+    @wraps(f)
+    async def wrapper(*args, **kwargs):
+        try:
+            async for r in f(*args, **kwargs):
+                yield r
         except Exception as e:
             logger.exception(e)
             raise
@@ -49,28 +64,50 @@ class LlamaServicer(chimera_llm_pb2_grpc.LLMServicer):
         tokenizer_path: str,
         max_seq_len: Optional[int] = None,
         max_batch_size: Optional[int] = None,
+        prefer_model_tag: chimera_llm_pb2.ModelTag = chimera_llm_pb2.CHAT,
+        *,
+        report_duration: int = 5,
     ) -> None:
         if not max_seq_len:
             max_seq_len = 2048
         if not max_batch_size:
             max_batch_size = 8
 
-        logger.info("Initializing Llama model...")
-        logger.debug(
-            "\n"
-            f"ckpt_dir: {ckpt_dir} \n"
-            f"tokenizer_path: {tokenizer_path} \n"
-            f"max_seq_len: {max_seq_len} \n"
-            f"max_batch_size: {max_batch_size} "
+        self.model_manager = ModelManager(
+            ckpt_dir,
+            tokenizer_path,
+            {
+                "max_seq_len": max_seq_len,
+                "max_batch_size": max_batch_size,
+            },
+            prefer_model_tag=prefer_model_tag,
+            init_model_when_construct=True,
         )
+        self.report_duration = report_duration
 
-        self.model: Llama = Llama.build(
-            ckpt_dir=ckpt_dir,
-            tokenizer_path=tokenizer_path,
-            max_seq_len=max_seq_len,
-            max_batch_size=max_batch_size,
-        )
-        logger.info("Llama model initialized.")
+    @property
+    def model(self) -> Llama:
+        return self.model_manager.model
+
+    @log_stream_exception
+    async def Inspect(
+        self,
+        request: chimera_llm_pb2.InspectRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> chimera_llm_pb2.InspectResponse:
+        duration = request.report_duration or self.report_duration
+        while True:
+            self.model_manager.refresh_avaliable_models()
+            yield chimera_llm_pb2.InspectResponse(
+                avaliable_models=self.model_manager.avaliable_model_list,
+                current_status=self.model_manager.status,
+                current_model=self.model_manager.current_model,
+            )
+            await asyncio.sleep(duration)
+
+    # @log_exception
+    # async def LoadModel(self, request, context):
+    # TODO: implement LoadModel
 
     @log_exception
     async def Completion(

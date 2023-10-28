@@ -8,7 +8,7 @@ from chimera_llm_proto import chimera_llm_pb2_grpc
 from chimera_llama_grpc.log import logger
 from chimera_llama_grpc.service import LlamaServicer
 
-DEFAULT_CKPT_DIR = "./ckpt/llama-2-7b-chat/"
+DEFAULT_CKPT_DIR = "./ckpt/"
 DEFAULT_TOKENIZER_PATH = "./ckpt/tokenizer.model"
 
 
