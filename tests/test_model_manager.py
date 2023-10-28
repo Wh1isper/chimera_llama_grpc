@@ -5,9 +5,7 @@ from chimera_llama_grpc.model_manager import ModelManager
 
 @pytest.fixture
 def model_manager(llama_ckpt_dir, llama_tokenizer_path):
-    model_manager = ModelManager(
-        llama_ckpt_dir, llama_tokenizer_path, {}, init_model_when_construct=False
-    )
+    model_manager = ModelManager(llama_ckpt_dir, llama_tokenizer_path, {})
     return model_manager
 
 

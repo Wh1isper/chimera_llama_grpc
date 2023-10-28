@@ -1,8 +1,10 @@
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from chimera_llm_proto.chimera_llm_pb2 import AvaliableModel, ModelTag
 
+from chimera_llama_grpc.exceptions import NoSuchModel
 from chimera_llama_grpc.llama import Llama
 from chimera_llama_grpc.log import logger
 
@@ -28,7 +30,6 @@ class ModelManager:
         model_params: Dict[str, Any],
         *,
         prefer_model_tag: int = ModelTag.CHAT,
-        init_model_when_construct: bool = True,
     ) -> None:
         if not isinstance(ckpt_dir, Path):
             ckpt_dir = Path(ckpt_dir).resolve()
@@ -48,9 +49,6 @@ class ModelManager:
             raise FileNotFoundError(f"No available models found in ckpt_dir: {self.ckpt_dir}")
         self.model_host = StatusfulModel()
         self.prefer_model_tag = prefer_model_tag
-        if init_model_when_construct:
-            # init model when construct via property
-            self.model  # noqal
 
     @property
     def model(self):
@@ -100,8 +98,11 @@ class ModelManager:
         try:
             current_model = self.get_model_by_id(model_id)
             if not current_model:
-                raise ValueError(f"Model not found via model_id: {model_id}")
+                raise NoSuchModel(f"Model not found via model_id: {model_id}")
             logger.info(f"Changing model to {current_model.model_name}")
+            if self.model_host.model:
+                self.model_params["model_parallel_size"] = int(os.environ.get("WORLD_SIZE", 1))
+            del self.model_host.model
             self.model_host.model = self._initialize_model(current_model.model_id)
             self.model_host.current_model = current_model
         except Exception as e:
@@ -147,23 +148,34 @@ class ModelManager:
         """
 
         avaliable_models: Dict[Path, AvaliableModel] = {}
+        index = 1
 
-        for i, ckpt_model_dir in enumerate(self.ckpt_dir.iterdir()):
+        for ckpt_model_dir in self.ckpt_dir.iterdir():
             if not ckpt_model_dir.is_dir():
                 logger.debug(f"Skip non-dir file: {ckpt_model_dir}")
                 continue
 
             logger.debug(f"Found model dir: {ckpt_model_dir}")
+
+            # Check consolidated.*.pth and params.json
+            if not list(ckpt_model_dir.glob("consolidated.*.pth")):
+                logger.debug(f"Skip model dir without consolidated.*.pth: {ckpt_model_dir}")
+                continue
+            if not list(ckpt_model_dir.glob("params.json")):
+                logger.debug(f"Skip model dir without params.json: {ckpt_model_dir}")
+                continue
+
             model_name = ckpt_model_dir.name
             model_tags = self._get_tags_from_dir_name(ckpt_model_dir.name)
             model_size = self._get_model_size_from_dir_name(ckpt_model_dir.name)
             avaliable_models[ckpt_model_dir] = AvaliableModel(
-                model_id=i,
+                model_id=index,
                 model_name=model_name,
                 model_description=self.model_description,
                 model_tagas=model_tags,
                 size=model_size,
             )
+            index += 1
         logger.debug(f"Found {len(avaliable_models)} models in {self.ckpt_dir}")
         return avaliable_models
 

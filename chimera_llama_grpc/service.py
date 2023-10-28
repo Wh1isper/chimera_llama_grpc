@@ -1,11 +1,14 @@
 import asyncio
+import json
 from functools import wraps
 from typing import Optional
 
 import grpc
 from chimera_llm_proto import chimera_llm_pb2, chimera_llm_pb2_grpc
 from chimera_llm_proto.tools import get_inference_args, get_uuid
+from watchfiles import awatch
 
+from chimera_llama_grpc.exceptions import NoSuchModel
 from chimera_llama_grpc.llama import Llama
 from chimera_llama_grpc.log import logger
 from chimera_llama_grpc.model_manager import ModelManager
@@ -66,7 +69,7 @@ class LlamaServicer(chimera_llm_pb2_grpc.LLMServicer):
         max_batch_size: Optional[int] = None,
         prefer_model_tag: chimera_llm_pb2.ModelTag = chimera_llm_pb2.CHAT,
         *,
-        report_duration: int = 5,
+        report_duration: int = 60,
     ) -> None:
         if not max_seq_len:
             max_seq_len = 2048
@@ -81,7 +84,6 @@ class LlamaServicer(chimera_llm_pb2_grpc.LLMServicer):
                 "max_batch_size": max_batch_size,
             },
             prefer_model_tag=prefer_model_tag,
-            init_model_when_construct=True,
         )
         self.report_duration = report_duration
 
@@ -95,19 +97,58 @@ class LlamaServicer(chimera_llm_pb2_grpc.LLMServicer):
         request: chimera_llm_pb2.InspectRequest,
         context: grpc.aio.ServicerContext,
     ) -> chimera_llm_pb2.InspectResponse:
+        yield chimera_llm_pb2.InspectResponse(
+            avaliable_models=self.model_manager.avaliable_model_list,
+            current_status=self.model_manager.status,
+            current_model=self.model_manager.current_model,
+        )
+
         duration = request.report_duration or self.report_duration
         while True:
-            self.model_manager.refresh_avaliable_models()
-            yield chimera_llm_pb2.InspectResponse(
-                avaliable_models=self.model_manager.avaliable_model_list,
-                current_status=self.model_manager.status,
-                current_model=self.model_manager.current_model,
-            )
-            await asyncio.sleep(duration)
+            async for _ in awatch(
+                self.model_manager.ckpt_dir,
+                rust_timeout=duration * 1000,
+                yield_on_timeout=True,
+            ):
+                self.model_manager.refresh_avaliable_models()
+                yield chimera_llm_pb2.InspectResponse(
+                    avaliable_models=self.model_manager.avaliable_model_list,
+                    current_status=self.model_manager.status,
+                    current_model=self.model_manager.current_model,
+                )
 
-    # @log_exception
-    # async def LoadModel(self, request, context):
-    # TODO: implement LoadModel
+    @log_exception
+    async def LoadModel(
+        self,
+        request: chimera_llm_pb2.LoadModelRequest,
+        context: grpc.aio.ServicerContext,
+    ) -> chimera_llm_pb2.LoadModelResponse:
+        if request.json_model_param:
+            self.model_manager.model_params = json.loads(request.json_model_param)
+        if request.model_id and (
+            (
+                # if current model is not None and current model is not the target model
+                self.model_manager.current_model
+                and request.model_id != self.model_manager.current_model.model_id
+            )
+            # or current model is None
+            or not self.model_manager.current_model
+        ):
+            try:
+                await run_in_threadpool(self.model_manager.change_model, request.model_id)
+            except NoSuchModel as e:
+                context.set_code(grpc.StatusCode.NOT_FOUND)
+                context.set_details(str(e))
+                raise
+
+            except Exception as e:
+                context.set_code(grpc.StatusCode.INTERNAL)
+                context.set_details(str(e))
+                raise
+        return chimera_llm_pb2.LoadModelResponse(
+            current_status=self.model_manager.status,
+            current_model=self.model_manager.current_model,
+        )
 
     @log_exception
     async def Completion(

@@ -8,12 +8,13 @@ description = "chimera_llama_grpc"
 keywords = ["chimera_llama_grpc"]
 requires-python = ">=3.8"
 dependencies = [
-    "chimera_llm_proto",
+    "chimera_llm_proto==0.1.0",
     "click",
     "anyio",
     "pydantic>=2",
     "loguru",
     "importlib_metadata",
+    "watchfiles",
     # LLAMA
     "torch",
     "fairscale",

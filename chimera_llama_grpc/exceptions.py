@@ -1,0 +1,2 @@
+class NoSuchModel(Exception):
+    pass
