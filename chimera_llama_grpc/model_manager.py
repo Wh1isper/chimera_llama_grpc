@@ -1,4 +1,6 @@
 import os
+import threading
+from functools import wraps
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -11,6 +13,15 @@ from chimera_llama_grpc.log import logger
 STATUS_NOT_READY = 0
 STATUS_INITLIZING = 1
 STATUS_READY = 2
+
+
+def lock_acquire(func):
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        with self.mutex:
+            return func(self, *args, **kwargs)
+
+    return wrapper
 
 
 class StatusfulModel:
@@ -49,6 +60,7 @@ class ModelManager:
             raise FileNotFoundError(f"No available models found in ckpt_dir: {self.ckpt_dir}")
         self.model_host = StatusfulModel()
         self.prefer_model_tag = prefer_model_tag
+        self.mutex = threading.Lock()
 
     @property
     def model(self):
@@ -84,6 +96,7 @@ class ModelManager:
         logger.info(f"Model initialized: {m}")
         return m
 
+    @lock_acquire
     def change_model(
         self,
         model_id: Optional[str] = None,
