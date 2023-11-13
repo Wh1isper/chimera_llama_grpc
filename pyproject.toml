@@ -8,7 +8,7 @@ description = "chimera_llama_grpc"
 keywords = ["chimera_llama_grpc"]
 requires-python = ">=3.8"
 dependencies = [
-    "chimera_llm_proto==0.1.0",
+    "chimera_llm_proto==0.1.1",
     "click",
     "anyio",
     "pydantic>=2",
