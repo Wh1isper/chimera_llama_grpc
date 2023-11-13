@@ -15,8 +15,9 @@ from fairscale.nn.model_parallel.initialize import (
     initialize_model_parallel,
     model_parallel_is_initialized,
 )
-from llama.model import ModelArgs, Transformer
-from llama.tokenizer import Tokenizer
+
+from chimera_llama_grpc.llama.model import ModelArgs, Transformer
+from chimera_llama_grpc.llama.tokenizer import Tokenizer
 
 Role = Literal["system", "user", "assistant"]
 
